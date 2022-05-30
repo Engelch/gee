@@ -1,0 +1,130 @@
+#!/usr/bin/env bash
+# To enable this hook, rename this file to ".git/hooks/pre-commit".
+# Copyright © 2021 engel-ch@outlook.com
+# License: MIT
+declare -r version=1.0.0
+# CHANGELOG
+# 1.0.0
+# - check and load file file_dependencies.lst
+export DebugFlag=${DebugFlag:-FALSE}
+
+#########################################################################################
+# SKELETON FUNCTIONS, considered R/O, v0.4.1 EXCERPT
+
+# so helps to write a message in reverse mode
+function so()
+# always show such a message.  If known terminal, print the message
+# in reverse video mode. This is the other way, not using escape sequences
+{
+   [ "$1" != on -a "$1" != off ] && return 
+    if [ "$TERM" = xterm -o "$TERM" = vt100 -o "$TERM" = xterm-256color  -o "$TERM" = screen ] ; then
+      [ "$1" = on ] && tput smso 
+      [ "$1" = off ] && tput rmso
+    fi
+}
+
+# --- debug: Conditional debugging. All commands begin w/ debug.
+
+function debugSet()             { DebugFlag=TRUE; return 0; }
+function debugUnset()           { DebugFlag=; return 0; }
+function debugExecIfDebug()     { [ "$DebugFlag" = TRUE ] && $*; return 0; }
+function debug()                { [ "$DebugFlag" = TRUE ] && echo 'DEBUG:'$* 1>&2 ; return 0; }
+function debug4()               { [ "$DebugFlag" = TRUE ] && echo 'DEBUG:    ' $* 1>&2 ; return 0; }
+function debug8()               { [ "$DebugFlag" = TRUE ] && echo 'DEBUG:        ' $* 1>&2 ; return 0; }
+function debug12()              { [ "$DebugFlag" = TRUE ] && echo 'DEBUG:            ' $* 1>&2 ; return 0; }
+
+# --- Exits
+
+# function error()        { err 'ERROR:' $*; return 0; } # similar to err but with ERROR prefix and possibility to include 
+# Write an error message to stderr. We cannot use err here as the spaces would be removed.
+function error()        { so on; echo 'ERROR:'$* 1>&2;            so off ; return 0; }
+function error4()       { so on; echo 'ERROR:    '$* 1>&2;        so off ; return 0; }
+function error8()       { so on; echo 'ERROR:        '$* 1>&2;    so off ; return 0; }
+function error12()      { so on; echo 'ERROR:            '$* 1>&2;so off ; return 0; }
+
+function warning()      { so on; echo 'WARNING:'$* 1>&2;          so off; return 0; }
+
+
+function errorExit()    { EXITCODE=$1 ; shift; error $* ; exit $EXITCODE; }
+function exitIfErr()    { a="$1"; b="$2"; shift; shift; [ "$a" -ne 0 ] && errorExit $b App returned $b $*; }
+
+function err()          { echo $* 1>&2; }                 # just write to stderr
+function err4()         { echo '   ' $* 1>&2; }           # just write to stderr
+function err8()         { echo '       ' $* 1>&2; }       # just write to stderr
+function err12()        { echo '           ' $* 1>&2; }   # just write to stderr
+
+# --- Existance checks
+function exitIfBinariesNotFound()       { for file in $@; do [ $(command -v "$file") ] || errorExit 253 binary not found: $file; done }
+function exitIfPlainFilesNotExisting()  { for file in $*; do [ ! -f $file ] && errorExit 254 'plain file not found:'$file 1>&2; done }
+function exitIfFilesNotExisting()       { for file in $*; do [ ! -e $file ] && errorExit 255 'file not found:'$file 1>&2; done }
+function exitIfDirsNotExisting()        { for dir in $*; do [ ! -d $dir ] && errorExit 252 "$APP:ERROR:directory not found:"$dir; done }
+
+# --- Temporary file/directory  creation
+# -- file creation -- TMP1=$(tempFile); TMP2=$(tempFile) ;;;; trap "rm -f $TMP1 $TMP2" EXIT
+# -- directory creation -- TMPDIR=$(tempDir) ;;;;;  trap "rm -fr $TMPDIR;" EXIT
+#
+function tempFile()                     { mktemp ${TMPDIR:-/tmp/}$_app.XXXXXXXX; }
+function tempDir()                      { mktemp -d "${TMPDIR:-/tmp/}$_app.YYYYYYYYY"; }
+
+# application-specific functions  ===============================================================================
+
+# findGeeCfgFiles lists the found gee.cfg files
+function findGeeCfgFiles() {
+   debug findGeeCfgFiles...........
+   readonly nl=''
+   local _files=$(find $1 -type f -name gee.cfg)
+   # exit proc if the output does not contain a gee.cfg file
+   [[ ! "$_files" =~ .gee.cfg* ]] && error pre-commit hook installed but no gee.cfg files && return 10
+   debug4 _files:$_files
+   echo $_files   # the call below consumes the stdout of this proc
+   return 0
+}
+
+# determineToBeEncryptedFiles determines the list of files that are considered private and outputs it to stdout
+function determineToBeEncryptedFiles() {
+   debug determineToBeEncryptedFiles $* ..........
+   out=
+   for geeFile in $* ; do
+      debug4 working on $geeFile
+      for entry in $(cat $geeFile | egrep -v '^[[:space:]]*#' | egrep -v '^$') ; do
+         debug8 entry $entry
+         out="$out $(find $(dirname $geeFile)/$entry -type f -print)"; res=$?
+         [ $res -ne 0 ] && return 20
+      done
+   done
+   debug4 collected output is $out
+   echo $out   # the call below consumes the stdout of this proc
+   return 0
+}
+
+# checkEncryptedFileStatus checks for the supplied file list, if the files are encrypted. return 0 :== all encrypted
+# It checks this for all files.
+function checkEncryptedFileStatus() {
+   debug checkEncryptedFileStatus $* ...............
+   ires=0
+   for file in $* ; do
+      [ $(egrep '^\$ANSIBLE_VAULT;.*;AES256(;.*)?$' $file | wc -l) -eq 0 ] && ires=1 && err Unencrypted private file found: $file && continue
+      debug4 encrypted file found: $file
+   done
+   [ $ires -ne 0 ] && return 30
+   return 0
+}
+
+# The command works as expected
+#     git rev-parse --show-toplevel # show top-level directory which is under git
+
+function main() {
+   exitIfBinariesNotFound ansible-vault find egrep cat dirname
+   [ "$1" = -d ] && debugSet
+   set -e   # exit if some exit code is -ne 0
+   _rootGitDir=$(git rev-parse --show-toplevel)
+   cfgs=$(findGeeCfgFiles $_rootGitDir) ; res=$?
+   # [ $res -ne 0 ] && exit $res
+   debug cfgs: $cfgs
+   privateFiles=$(determineToBeEncryptedFiles $cfgs)
+   checkEncryptedFileStatus $privateFiles
+}
+
+main $@
+
+### EOF

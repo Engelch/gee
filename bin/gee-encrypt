@@ -1,0 +1,184 @@
+#!/usr/bin/env bash
+# To enable this hook, rename this file to ".git/hooks/pre-commit".
+# Copyright © 2021 engel-ch@outlook.com
+# License: MIT
+declare -r version=1.0.0
+# CHANGELOG
+# 1.0.0
+# - check and load file file_dependencies.lst
+export DebugFlag=${DebugFlag:-FALSE}
+readonly _app=$(basename $0)
+readonly _appDir=$(dirname $(readlink -f $0))
+readonly _appVersion="1.0.0" # use semantic versioning
+
+#########################################################################################
+# SKELETON FUNCTIONS, considered R/O, v0.4.1 excerpt
+
+# so helps to write a message in reverse mode
+function so()
+# always show such a message.  If known terminal, print the message
+# in reverse video mode. This is the other way, not using escape sequences
+{
+   [ "$1" != on -a "$1" != off ] && return 
+    if [ "$TERM" = xterm -o "$TERM" = vt100 -o "$TERM" = xterm-256color  -o "$TERM" = screen ] ; then
+      [ "$1" = on ] && tput smso 
+      [ "$1" = off ] && tput rmso
+    fi
+}
+
+# --- debug: Conditional debugging. All commands begin w/ debug.
+
+function debugSet()             { DebugFlag=TRUE; return 0; }
+function debugUnset()           { DebugFlag=; return 0; }
+function debugExecIfDebug()     { [ "$DebugFlag" = TRUE ] && $*; return 0; }
+function debug()                { [ "$DebugFlag" = TRUE ] && echo 'DEBUG:'$* 1>&2 ; return 0; }
+function debug4()               { [ "$DebugFlag" = TRUE ] && echo 'DEBUG:    ' $* 1>&2 ; return 0; }
+function debug8()               { [ "$DebugFlag" = TRUE ] && echo 'DEBUG:        ' $* 1>&2 ; return 0; }
+function debug12()              { [ "$DebugFlag" = TRUE ] && echo 'DEBUG:            ' $* 1>&2 ; return 0; }
+
+# --- Exits
+
+# function error()        { err 'ERROR:' $*; return 0; } # similar to err but with ERROR prefix and possibility to include 
+# Write an error message to stderr. We cannot use err here as the spaces would be removed.
+function error()        { so on; echo 'ERROR:'$* 1>&2;            so off ; return 0; }
+function error4()       { so on; echo 'ERROR:    '$* 1>&2;        so off ; return 0; }
+function error8()       { so on; echo 'ERROR:        '$* 1>&2;    so off ; return 0; }
+function error12()      { so on; echo 'ERROR:            '$* 1>&2;so off ; return 0; }
+
+function warning()      { so on; echo 'WARNING:'$* 1>&2;          so off; return 0; }
+
+
+function errorExit()    { EXITCODE=$1 ; shift; error $* ; exit $EXITCODE; }
+function exitIfErr()    { a="$1"; b="$2"; shift; shift; [ "$a" -ne 0 ] && errorExit $b App returned $b $*; }
+
+function err()          { echo $* 1>&2; }                 # just write to stderr
+function err4()         { echo '   ' $* 1>&2; }           # just write to stderr
+function err8()         { echo '       ' $* 1>&2; }       # just write to stderr
+function err12()        { echo '           ' $* 1>&2; }   # just write to stderr
+
+# --- Existance checks
+function exitIfBinariesNotFound()       { for file in $@; do [ $(command -v "$file") ] || errorExit 253 binary not found: $file; done }
+function exitIfPlainFilesNotExisting()  { for file in $*; do [ ! -f $file ] && errorExit 254 'plain file not found:'$file 1>&2; done }
+function exitIfFilesNotExisting()       { for file in $*; do [ ! -e $file ] && errorExit 255 'file not found:'$file 1>&2; done }
+function exitIfDirsNotExisting()        { for dir in $*; do [ ! -d $dir ] && errorExit 252 "$APP:ERROR:directory not found:"$dir; done }
+
+# --- Temporary file/directory  creation
+# -- file creation -- TMP1=$(tempFile); TMP2=$(tempFile) ;;;; trap "rm -f $TMP1 $TMP2" EXIT
+# -- directory creation -- TMPDIR=$(tempDir) ;;;;;  trap "rm -fr $TMPDIR;" EXIT
+#
+function tempFile()                     { mktemp ${TMPDIR:-/tmp/}$_app.XXXXXXXX; }
+function tempDir()                      { mktemp -d "${TMPDIR:-/tmp/}$_app.YYYYYYYYY"; }
+# realpath as shell, argument either supplied as stdin or as $1
+
+# application-specific functions  ===============================================================================
+
+function usage()
+{
+    err DESCRIPTION
+    err4 En- or decrypt files specified in gee.cfg or specified files 
+    err4 if the -f option is specified.
+    err
+    err $_app
+    err SYNOPSIS
+    err4 $_app '[-D] (-e|-d) <<pwFile>>'
+    err4 $_app '[-D] -f (-e|-d) <<pwFile>> <<file>>...'
+    err4 $_app '-h'
+    err
+    err VERSION
+    err4 $_appVersion
+    err
+    err OPTIONS
+    err4 '-D      ::= enable debug output'
+    err4 '-h      ::= show usage message and exit with exit code 1'
+    err4 '-e      ::= encrypt unencrypted, private files'
+    err4 '-d      ::= decrypt encrypted, private files'
+    err4 '-f      ::= forced mode, try to en/decrypt given file(s) even if not specified by a gee.cfg file'
+}
+
+function parseCLI() {
+    local currentOption
+    while getopts "Dfhedu" options; do         # Loop: Get the next option;
+        case "${options}" in                    # TIMES=${OPTARG}
+            D)    err Debug enabled ; debugSet     
+                  ;;
+            f)    debug forcedMode; forcedMode=TRUE
+                  ;;
+            h)    usage ; exit 1
+                  ;;
+            e|d|u)  debug mode set to $options
+                  mode=$options
+                  ;;
+            *)    err Help with $_app -h
+                  exit 2  # Exit abnormally.
+                  ;;
+        esac
+    done
+    [ -z "$mode" ] && usage && errorExit 10 Either decrypt or encrypt mode must be defined.
+}
+
+# checkPwFileArg checks if the given file is existing and readable.
+# It also does so if the file is prefixed with an id.
+# If no id was specified, then the filename (without the suffix) will be used as the id.
+function checkPwFileArg() {
+   if [[ "$1" =~ .*@.* ]] ; then
+      _tmp=$(echo $1 | sed -e 's/.*@//')
+      [ ! -f $_tmp ] && error pw-file is not a file:$_tmp && return 22
+      [ ! -r $_tmp ] && error pw-file is not readable:$_tmp && return 23
+      echo $1   
+   else
+      [ ! -f $1 ] && error pw-file is not a file && return 22
+      [ ! -r $1 ] && error pw-file is not readable && return 23
+      # split directory and suffix from filename so that the rest can be used as the id
+      echo $(basename $1 | sed -e 's/\..*//')@$1
+   fi
+   return 0
+}
+
+# PRE:   $1 is an existing, readable plain file or points to it (s-link), consisting PW
+#        $2 mode ::= decrypt | encrypt
+function deencryptFiles() {
+   debug4 deencryptFiles $* ...............
+   pw=$1
+   mode=$2
+   shift ; shift
+   [ "$mode" != encrypt -a "$mode" != decrypt ] && error4 deencryptFiles:unknown mode:$mode && return 50
+   res=0
+   set +e
+   for file in $* ; do
+      debug8 ansible-vault $mode --vault-id $pw $file;
+      ansible-vault $mode --vault-id $pw $file; ((res+=$?))
+   done
+   set -e
+   debug8 deencryptFiles ret code is $res
+   return $res
+}
+
+# The command works as expected
+#     git rev-parse --show-toplevel # show top-level directory which is under git
+
+function main() {
+   exitIfBinariesNotFound tput mktemp basename dirname egrep find ansible-vault wc sed $_appDir/gee-privateFiles
+   parseCLI $* 
+   shift $(($OPTIND - 1))  # not working inside parseCLI
+   [ $# -ne 1 -a "$forcedMode" != TRUE ]  && errorExit 1 not exactly one pw-file specified. Arg \# is $#, args: $*
+   [ $# -lt 2 -a "$forcedMode" = TRUE ]   && errorExit 2 forcedMode requires at least 2 arguments. Arg \# is $#, args: $*
+   set -e   # exit if some exit code in -ne 0
+   readonly _idPwfile=$(checkPwFileArg $1)
+   shift
+   debug vaultid is $_idPwfile
+
+   if [ "$forcedMode" = TRUE ] ; then
+      deencryptFiles $_idPwfile $longmode $*
+   elif [ $mode = e ] ; then
+      debug we shall encrypt, so list the unencrypted ones
+      deencryptFiles $_idPwfile encrypt $($_appDir/gee-privateFiles -u)
+   else
+      debug decrypt mode, list the encrypted ones
+      deencryptFiles $_idPwfile decrypt $($_appDir/gee-privateFiles -e)
+   fi
+   return 0
+}  
+
+main $@
+
+### EOF

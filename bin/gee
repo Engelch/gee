@@ -1,0 +1,229 @@
+#!/usr/bin/env bash
+# vim: set expandtab: ts=3: sw=3
+#
+# TITLE: $_app
+#
+# DESCRIPTION: <see usage function below>
+#
+# CHANGELOG: todo
+# - 1.0.0:
+#
+# COPYRIGHT © 2022 Christian Engel (mailto:engel-ch@outlook.com)
+#
+# Skeleton: 
+# << deleted >>
+#
+# LICENSE: MIT 
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy of this
+# software and associated documentation files (the "Software"), to deal in the Software
+# without restriction, including without limitation the rights to use, copy, modify, merge,
+# publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons
+# to whom the Software is furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all copies
+# or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED,
+# INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR
+# PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE
+# FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
+# ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+#
+
+#########################################################################################
+# VARIABLES, CONSTANTS
+
+# readonly skeleton_version=0.4.1 # variable normally not required
+
+readonly _app=$(basename $0)
+readonly _appDir=$(dirname $(readlink -f $0))
+readonly _appVersion="1.0.0" # use semantic versioning
+export DebugFlag=${DebugFlag:-FALSE}
+
+#########################################################################################
+# SKELETON FUNCTIONS, considered R/O, v0.4.1 excerpt
+
+# so helps to write a message in reverse mode
+function so()
+# always show such a message.  If known terminal, print the message
+# in reverse video mode. This is the other way, not using escape sequences
+{
+   [ "$1" != on -a "$1" != off ] && return 
+    if [ "$TERM" = xterm -o "$TERM" = vt100 -o "$TERM" = xterm-256color  -o "$TERM" = screen ] ; then
+      [ "$1" = on ] && tput smso 
+      [ "$1" = off ] && tput rmso
+    fi
+}
+
+# --- debug: Conditional debugging. All commands begin w/ debug.
+
+function debugSet()             { DebugFlag=TRUE; return 0; }
+function debugUnset()           { DebugFlag=; return 0; }
+function debugExecIfDebug()     { [ "$DebugFlag" = TRUE ] && $*; return 0; }
+function debug()                { [ "$DebugFlag" = TRUE ] && echo 'DEBUG:'$* 1>&2 ; return 0; }
+function debug4()               { [ "$DebugFlag" = TRUE ] && echo 'DEBUG:    ' $* 1>&2 ; return 0; }
+function debug8()               { [ "$DebugFlag" = TRUE ] && echo 'DEBUG:        ' $* 1>&2 ; return 0; }
+function debug12()              { [ "$DebugFlag" = TRUE ] && echo 'DEBUG:            ' $* 1>&2 ; return 0; }
+
+# --- Exits
+
+# function error()        { err 'ERROR:' $*; return 0; } # similar to err but with ERROR prefix and possibility to include 
+# Write an error message to stderr. We cannot use err here as the spaces would be removed.
+function error()        { so on; echo 'ERROR:'$* 1>&2;            so off ; return 0; }
+function error4()       { so on; echo 'ERROR:    '$* 1>&2;        so off ; return 0; }
+function error8()       { so on; echo 'ERROR:        '$* 1>&2;    so off ; return 0; }
+function error12()      { so on; echo 'ERROR:            '$* 1>&2;so off ; return 0; }
+
+function warning()      { so on; echo 'WARNING:'$* 1>&2;          so off; return 0; }
+
+
+function errorExit()    { EXITCODE=$1 ; shift; error $* ; exit $EXITCODE; }
+function exitIfErr()    { a="$1"; b="$2"; shift; shift; [ "$a" -ne 0 ] && errorExit $b App returned $b $*; }
+
+function err()          { echo $* 1>&2; }                 # just write to stderr
+function err4()         { echo '   ' $* 1>&2; }           # just write to stderr
+function err8()         { echo '       ' $* 1>&2; }       # just write to stderr
+function err12()        { echo '           ' $* 1>&2; }   # just write to stderr
+
+# --- Existance checks
+function exitIfBinariesNotFound()       { for file in $@; do [ $(command -v "$file") ] || errorExit 253 binary not found: $file; done }
+function exitIfPlainFilesNotExisting()  { for file in $*; do [ ! -f $file ] && errorExit 254 'plain file not found:'$file 1>&2; done }
+function exitIfFilesNotExisting()       { for file in $*; do [ ! -e $file ] && errorExit 255 'file not found:'$file 1>&2; done }
+function exitIfDirsNotExisting()        { for dir in $*; do [ ! -d $dir ] && errorExit 252 "$APP:ERROR:directory not found:"$dir; done }
+
+# --- Temporary file/directory  creation
+# -- file creation -- TMP1=$(tempFile); TMP2=$(tempFile) ;;;; trap "rm -f $TMP1 $TMP2" EXIT
+# -- directory creation -- TMPDIR=$(tempDir) ;;;;;  trap "rm -fr $TMPDIR;" EXIT
+#
+function tempFile()                     { mktemp ${TMPDIR:-/tmp/}$_app.XXXXXXXX; }
+function tempDir()                      { mktemp -d "${TMPDIR:-/tmp/}$_app.YYYYYYYYY"; }
+# realpath as shell, argument either supplied as stdin or as $1
+
+# application-specific functions  ===============================================================================
+
+function usage()
+{
+    err DESCRIPTION
+    err4 wrapper for gee functionality. Any short form of the commands are possible.
+    err4 UPPER case names in synopsis are considered to be non-terminals,
+    err4 others are terminals.
+    err
+    err SYNOPSIS
+    err4 $_app '[-D] ENCRYPT <<pwFile>>'
+    err8 'ENCRYPT ::= e | en | enc | encr | encry | encryp | encrypt | encrypted'
+    err
+    err4 $_app '[-D] DECRYPT <<pwFile>>'
+    err8 'DECRYPT ::= d|de|dec|decr|decry|decryp|decrypt| u | unencrypt'
+    err
+    err4 $_app '[-D] LST [-q]'
+    err4 $_app '[-D] LST -p | p | -e | e | prv | priv | private | encrypted'
+    err4 $_app '[-D] LST -u | u | -d | d | dec | decr | decrypted | unenc | unencrypt | unencrypted'
+    err8 'LST ::= l|li|lis|list|lst'
+    err
+    err4 $_app '-h'
+    err
+    err VERSION
+    err4 $_appVersion
+    err
+    err OPTIONS
+    err4 '-D      ::= enable debug output'
+    err4 '-h      ::= show usage message and exit with exit code 1'
+    err4 'encrypt file ::= encrypt all private, non-encrypted files with the given pw-file'
+    err4 'decrypt file ::= decrypt all private, encrypted files with the given pw-file'
+    err4 'list    ::= list all private files and show their encryption status'
+    err4 'list -q ::= list all private files without their encryption status'
+    err4 'list -e ::= list only encrypted, private files'
+    err4 'list -p ::= list only encrypted, private files'
+    err4 'list -d ::= list only unencrypted, private files'
+    err4 'list -u ::= list only unencrypted, private files'
+}
+
+function parseCLI() {
+    while getopts "Dh" options; do         # Loop: Get the next option;
+        case "${options}" in                    # TIMES=${OPTARG}
+            D)  err Debug enabled ; debugSet     
+                ;;
+            h)  usage ; exit 1
+                ;;
+            *)  err Help with $_app -h
+                exit 2  # Exit abnormally.
+                ;;
+        esac
+    done
+}
+
+function parseListCLI() {
+    debug4 parseListCLI $* ......................
+    case $1 in 
+    -q|q|quiet)  debug8 quiet mode in list CLI
+        _quiet=-q
+        shift
+        parseListCLI $*
+        ;;
+    -d|d|dec|decr|decrypt|decrypted|-u|u|unenc|unencrypt|unencrypted)  
+        debug8 decrypted mode in list CLI
+        [ "$_encryptedOnly" = TRUE ] && errorExit 20 encrypted und decrypted mode together
+        _unencryptedOnly=TRUE
+        shift 
+        parseListCLI $*
+        ;;
+    -e|e|enc|encr|encry|encryp|encrypt|encrypted|-p|p|prv|priv|private)  
+        debug8 decrypted mode in list CLI
+        [ "$_unencryptedOnly" = TRUE ] && errorExit 21 encrypted und decrypted mode together
+        _encryptedOnly=TRUE
+        shift 
+        parseListCLI $*
+        ;;                
+    esac
+}
+
+function checkPreCommitHookExisting() {
+    readonly _hook=$(git rev-parse --show-toplevel)/.git/hooks/pre-commit
+    [ -e "$_hook" -a ! -f "$_hook" ] && error Other object type with name $_hook && return 1
+    [ ! -f "$_hook" ] && error Hook $_hook not found. && return 2
+    [ ! -r "$_hook" ] && error Hook $_hook not readable. && return 3
+    return 0
+}
+
+function main() {
+    exitIfBinariesNotFound tput basename dirname readlink git 
+    exitIfFilesNotExisting "$_appDir"/gee-encrypt "$_appDir"/gee-privateFiles
+    parseCLI $* 
+    shift $(($OPTIND - 1))  # not working inside parseCLI
+    debug args after CLI parsing are $*
+    checkPreCommitHookExisting ; res=$? ; [ $res -ne 0 ] && return $res
+    _mode=$1
+    case $_mode in
+    l|li|lis|list|lst)
+        debug list mode
+        shift
+        parseListCLI $*
+        debug4 parsing result quiet $_quiet, _unencryptedOnly $_unencryptedOnly, _encryptedOnly $_encryptedOnly 
+        if [ ! -z "$_unencryptedOnly" ] ; then
+            "$_appDir"/gee-privateFiles -u
+        elif [ ! -z "$_encryptedOnly" ] ; then
+            "$_appDir"/gee-privateFiles -e
+        else
+            "$_appDir"/gee-privateFiles $_quiet
+        fi
+        ;;
+    e|en|enc|encr|encry|encryp|encrypt|encrypted)
+        debug encrypt mode
+        shift
+        "$_appDir"/gee-encrypt -e $*
+        ;;
+    d|de|dec|decr|decry|decryp|decrypt|u|un|une|unen|unencr|unencry|unencryp|unencrypt|unencrypted)
+        debug decrypt mode
+        shift
+        "$_appDir"/gee-encrypt -d $*
+        ;; 
+    *)  usage; exit 2
+        ;;
+    esac
+    return 0
+}    
+
+main $*
+
+# EOF
