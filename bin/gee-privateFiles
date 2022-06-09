@@ -9,7 +9,7 @@
 readonly _app=$(basename $0)
 readonly _appDir=$(dirname $0)
 readonly _absoluteAppDir=$(cd $_appDir; /bin/pwd)
-readonly _appVersion="1.0.0" # use semantic versioning
+readonly _appVersion="1.0.3" # use semantic versioning
 export DebugFlag=${DebugFlag:-FALSE}
 
 #########################################################################################
